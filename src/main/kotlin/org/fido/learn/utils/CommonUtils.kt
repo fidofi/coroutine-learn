@@ -26,7 +26,7 @@ object CommonUtils {
     fun simulateHttpReq(): String {
         return (measureTime {
             val url =
-                URL("")
+                URL("http://localhost:8080/main/inc/1")
             val connection = url.openConnection() as HttpURLConnection
             connection.responseCode
         }.toLongMilliseconds()).toString()
