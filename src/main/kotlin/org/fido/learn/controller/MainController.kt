@@ -10,11 +10,14 @@ import org.springframework.web.bind.annotation.RestController
  * @description:
  * @date: Created in  2022/6/7
  */
-@RequestMapping("/test")
+@RequestMapping("/main")
 @RestController
-class TestController {
-    @GetMapping("/{id}")
-    fun test(@PathVariable id: Int): Int {
+class MainController {
+    @GetMapping("/inc/{id}")
+    fun getInt(@PathVariable id: Int): Int {
+        //模拟耗时
+        Thread.sleep(5000)
         return id + 1
     }
+
 }

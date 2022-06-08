@@ -1,119 +1,128 @@
 package org.fido.learn.controller
 
-import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import okhttp3.Call
+import kotlinx.coroutines.*
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.fido.learn.utils.CommonUtils
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * @author: wangxianfei
  * @description:
- * @date: Created in  2022/6/6
+ * @date: Created in  2022/6/7
  */
 @RestController
-@RequestMapping("/callback-hell")
-class CallbackSampleController {
+@RequestMapping("/callback")
+class ChangeCallBackController {
 
     @Autowired
     private lateinit var okHttpClient: OkHttpClient
 
-    val threadMap = mutableMapOf<String, CoroutineDispatcher>()
+    val executor = Executors.newFixedThreadPool(2)
 
-    @GetMapping
-    fun asyncLoadData() {
-        val threadName = Thread.currentThread().name
-        firstCall { firstResult ->
-            secondCall(firstResult) { secondResult ->
-                finalCall(secondResult) { finalResult ->
-                    println("get final result [${finalResult}]")
+    val singleExecutor = Executors.newScheduledThreadPool(1)
+
+    @GetMapping("/hell")
+    fun changeSyncToAsyncByThreadPool() {
+        executor.submit {
+            syncHttpReq("http://localhost:8080/main/inc/1", "first") { firstId ->
+                syncHttpReq("http://localhost:8080/main/inc/$firstId", "second") { secondId ->
+                    syncHttpReq("http://localhost:8080/main/inc/$secondId", "final") { finalId ->
+                        println(CommonUtils.formatOutput("final get result $finalId"))
+                    }
                 }
             }
         }
-        println("current")
+        println(CommonUtils.formatOutput("doing other work in main http thread....."))
     }
 
-    @GetMapping("/fix-with-coroutine")
-    fun asyncLoadDataByCoroutine() {
-        GlobalScope.launch {
-            val firstId = firstCallWithCoroutine()
-            val secondId = secondCallWithCoroutine(firstId)
-            val finalId = finalCallWithCoroutine(secondId)
-            println("get final result [${finalId}]")
+    @GetMapping("/replaceBySuspend")
+    fun replaceCallBack() {
+        GlobalScope.launch(executor.asCoroutineDispatcher()) {
+            val firstId = replaceCallbackWithSuspendFun("http://localhost:8080/main/inc/1", "first")
+            val secondId = replaceCallbackWithSuspendFun("http://localhost:8080/main/inc/$firstId", "second")
+            val finalId = replaceCallbackWithSuspendFun("http://localhost:8080/main/inc/$secondId", "final")
+            println(CommonUtils.formatOutput("get final result [${finalId}]"))
         }
+        println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
-
-    suspend fun firstCallWithCoroutine(): Int {
-        val response = asyncReq("http://localhost:8080/test/1").execute()
-        if (response.isSuccessful) {
-            println("first call with coroutine success")
-            return String(response.body().bytes()).toInt()
+    @GetMapping("/switchThread")
+    fun switchThread() {
+        keepWorking()
+        GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
+            println(CommonUtils.formatOutput("doing work in single thread pool..."))
+            val result = withContext(executor.asCoroutineDispatcher()) {
+                syncHttpReq("http://localhost:8080/main/inc/1", "test") {}
+            }
+            println(CommonUtils.formatOutput("switch back to single thread pool,get result is $result,time is ${System.currentTimeMillis()}"))
         }
-        return -1
+        println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
-    suspend fun secondCallWithCoroutine(id: Int): Int {
-        val response = asyncReq("http://localhost:8080/test/${id}").execute()
-        if (response.isSuccessful) {
-            println("second call with coroutine success")
-            return String(response.body().bytes()).toInt()
+    @GetMapping("/useAsync")
+    fun useAsync() {
+        keepWorking()
+        GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
+            println(CommonUtils.formatOutput("doing work in single thread pool..."))
+            val result = async(executor.asCoroutineDispatcher()) {
+                syncHttpReq("http://localhost:8080/main/inc/1", "test") {}
+            }
+            println(CommonUtils.formatOutput("switch back to single thread pool,get result is ${result.await()},time is ${System.currentTimeMillis()}"))
         }
-        return -1
+        println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
-    suspend fun finalCallWithCoroutine(id: Int): Int {
-        val response = asyncReq("http://localhost:8080/test/${id}").execute()
-        if (response.isSuccessful) {
-            println("final call with coroutine success")
-            return String(response.body().bytes()).toInt()
+    @GetMapping("/useFuture")
+    fun useFuture() {
+        keepWorking()
+        GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
+            println(CommonUtils.formatOutput("doing work in single thread pool..."))
+            val result = executor.submit {
+                syncHttpReq("http://localhost:8080/main/inc/1", "test") {}
+            }
+            println(CommonUtils.formatOutput("switch back to single thread pool,get result is ${result.get()},time is ${System.currentTimeMillis()}"))
         }
-        return -1
+        println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
-    private fun firstCall(callback: (Int) -> Unit) {
-        val response = asyncReq("http://localhost:8080/test/1").execute()
-        if (response.isSuccessful) {
-            println("first call success")
-            val result = String(response.body().bytes()).toInt()
-            callback(result)
-        } else {
-            println("first call fail")
-        }
+
+    private fun keepWorking() {
+        singleExecutor.scheduleAtFixedRate(
+            { println(CommonUtils.formatOutput("i am working in single thread pool, at ${System.currentTimeMillis()}")) },
+            0,
+            1,
+            TimeUnit.SECONDS
+        )
     }
 
-    private fun secondCall(id: Int, callback: (Int) -> Unit) {
-        val response = asyncReq("http://localhost:8080/test/${id}").execute()
-        if (response.isSuccessful) {
-            println("second call success")
-            val result = String(response.body().bytes()).toInt()
-            callback(result)
-        } else {
-            println("second call fail")
-        }
-    }
-
-    private fun finalCall(id: Int, callback: (Int) -> Unit) {
-        val response = asyncReq("http://localhost:8080/test/${id}").execute()
-        if (response.isSuccessful) {
-            println("final call success")
-            val result = String(response.body().bytes()).toInt()
-            callback(result)
-        } else {
-            println("final call fail")
-        }
-    }
-
-    private fun asyncReq(host: String): Call {
-        return okHttpClient.newCall(
+    private fun syncHttpReq(host: String, time: String, callback: (Int) -> Unit): Int {
+        val response = okHttpClient.newCall(
             Request.Builder()
                 .url(host)
                 .build()
-        )
+        ).execute()
+        if (response.isSuccessful) {
+            val result = String(response.body().bytes()).toInt()
+            println(CommonUtils.formatOutput("$time call success, get result is $result"))
+            callback(result)
+            return result
+        } else {
+            println(CommonUtils.formatOutput("$time call fail"))
+        }
+        return -1
+    }
+
+    private suspend fun replaceCallbackWithSuspendFun(host: String, time: String): Int {
+        return suspendCoroutine { continuation ->
+            syncHttpReq(host, time) { continuation.resume(it) }
+        }
     }
 }
