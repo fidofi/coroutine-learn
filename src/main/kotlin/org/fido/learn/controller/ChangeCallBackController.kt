@@ -8,7 +8,9 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
@@ -25,9 +27,13 @@ class ChangeCallBackController {
     @Autowired
     private lateinit var okHttpClient: OkHttpClient
 
-    val executor = Executors.newFixedThreadPool(2)
+    val executor: ExecutorService = Executors.newFixedThreadPool(2) {
+        Thread(it, "demoThreadPool")
+    }
 
-    val singleExecutor = Executors.newScheduledThreadPool(1)
+    val singleExecutor: ScheduledExecutorService = Executors.newScheduledThreadPool(1) {
+        Thread(it, "singleThread")
+    }
 
     @GetMapping("/hell")
     fun changeSyncToAsyncByThreadPool() {
@@ -43,9 +49,10 @@ class ChangeCallBackController {
         println(CommonUtils.formatOutput("doing other work in main http thread....."))
     }
 
-    @GetMapping("/replaceBySuspend")
+    @GetMapping("/avoidHell")
     fun replaceCallBack() {
-        GlobalScope.launch(executor.asCoroutineDispatcher()) {
+        GlobalScope.launch(Dispatchers.IO) {
+            println(CommonUtils.formatOutput("Before doing replaceCallBack task...."))
             val firstId = replaceCallbackWithSuspendFun("http://localhost:8080/main/inc/1", "first")
             val secondId = replaceCallbackWithSuspendFun("http://localhost:8080/main/inc/$firstId", "second")
             val finalId = replaceCallbackWithSuspendFun("http://localhost:8080/main/inc/$secondId", "final")
@@ -54,35 +61,34 @@ class ChangeCallBackController {
         println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
-    @GetMapping("/switchThread")
-    fun switchThread() {
-        keepWorking()
+    /**
+     * 让一个单线程一秒钟跑一次打印任务
+     */
+    @GetMapping("/keepWorkingTrigger")
+    fun keepWorkingTrigger() {
+        singleExecutor.scheduleAtFixedRate(
+            { println(CommonUtils.formatOutput("i am working in single thread pool, at ${System.currentTimeMillis()}")) },
+            0,
+            1,
+            TimeUnit.SECONDS
+        )
+    }
+
+    @GetMapping("/useAsync")
+    fun useAsyncNotBlock() {
         GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
             println(CommonUtils.formatOutput("doing work in single thread pool..."))
-            val result = withContext(executor.asCoroutineDispatcher()) {
+            val deferred = async(executor.asCoroutineDispatcher()) {
                 syncHttpReq("http://localhost:8080/main/inc/1", "test") {}
             }
+            val result = deferred.await()
             println(CommonUtils.formatOutput("switch back to single thread pool,get result is $result,time is ${System.currentTimeMillis()}"))
         }
         println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
-    @GetMapping("/useAsync")
-    fun useAsync() {
-        keepWorking()
-        GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
-            println(CommonUtils.formatOutput("doing work in single thread pool..."))
-            val result = async(executor.asCoroutineDispatcher()) {
-                syncHttpReq("http://localhost:8080/main/inc/1", "test") {}
-            }
-            println(CommonUtils.formatOutput("switch back to single thread pool,get result is ${result.await()},time is ${System.currentTimeMillis()}"))
-        }
-        println(CommonUtils.formatOutput("doing other work in main http thread ....."))
-    }
-
-    @GetMapping("/useFuture")
+    @GetMapping("/useFutureButBlock")
     fun useFuture() {
-        keepWorking()
         GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
             println(CommonUtils.formatOutput("doing work in single thread pool..."))
             val result = executor.submit {
@@ -94,13 +100,18 @@ class ChangeCallBackController {
     }
 
 
-    private fun keepWorking() {
-        singleExecutor.scheduleAtFixedRate(
-            { println(CommonUtils.formatOutput("i am working in single thread pool, at ${System.currentTimeMillis()}")) },
-            0,
-            1,
-            TimeUnit.SECONDS
-        )
+    @GetMapping("/useFutureNotBlock")
+    fun useFutureNotBlock() {
+        GlobalScope.launch(singleExecutor.asCoroutineDispatcher()) {
+            println(CommonUtils.formatOutput("doing work in single thread pool..."))
+            executor.submit {
+                syncHttpReq("http://localhost:8080/main/inc/1", "test") {
+                    //切回来
+                    singleExecutor.execute { println(CommonUtils.formatOutput("switch back to single thread pool,get result is ${it},time is ${System.currentTimeMillis()}")) }
+                }
+            }
+        }
+        println(CommonUtils.formatOutput("doing other work in main http thread ....."))
     }
 
     private fun syncHttpReq(host: String, time: String, callback: (Int) -> Unit): Int {

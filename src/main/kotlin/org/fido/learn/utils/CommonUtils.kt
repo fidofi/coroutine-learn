@@ -1,12 +1,8 @@
 package org.fido.learn.utils
 
-import java.io.BufferedReader
-import java.io.InputStream
-import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import kotlin.time.ExperimentalTime
-import kotlin.time.measureTime
+import java.util.concurrent.Executors
 
 /**
  * @author: wangxianfei
@@ -14,38 +10,28 @@ import kotlin.time.measureTime
  * @date: Created in  2022/6/7
  */
 object CommonUtils {
+
+    /**
+     * 打印的同时输出当前线程
+     */
     fun formatOutput(str: String): String {
         return "[Thread name is : ${Thread.currentThread().name}]: $str"
     }
 
+    /**
+     * 让当前进程不要退出
+     */
     fun holdProcessNotExit() {
         Thread.sleep(20000)
     }
 
-    @OptIn(ExperimentalTime::class)
-    fun simulateHttpReq(): String {
-        return (measureTime {
-            val url =
-                URL("http://localhost:8080/main/inc/1")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.responseCode
-        }.toLongMilliseconds()).toString()
+    /**
+     * 模拟一个耗时的IO操作
+     */
+    fun simulateHttpReq() {
+        val url = URL("http://localhost:8080/main/inc/1")
+        (url.openConnection() as HttpURLConnection).responseCode
     }
 
-    private fun readData(inputStream: InputStream): String {
-        val reader = InputStreamReader(inputStream, "UTF8")
-        val br = BufferedReader(reader)
-        val sb = StringBuilder()
-        var context: String? = null
-        while (context != null) {
-            context = br.readLine()
-            sb.append(context)
-        }
-        return sb.toString()
-    }
-
-    const val BEFORE = "Before"
-    const val AFTER = "After"
-    const val SUSPEND = "Suspended"
-    const val RESUME = "Resumed"
+    val GLOBAL_EXECUTOR = Executors.newFixedThreadPool(3)
 }
