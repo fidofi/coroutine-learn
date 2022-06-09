@@ -10,7 +10,8 @@ import java.util.concurrent.Callable
  */
 
 fun main() {
-    cps()
+    directStyle()
+//    cps()
     println(CommonUtils.formatOutput("doing other work...."))
     CommonUtils.holdProcessNotExit()
 }
